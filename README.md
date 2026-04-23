@@ -16,7 +16,7 @@ make RAYLIB_PATH=/path/to/raylib
 ## Usage
 
 ```sh
-pxed -w <width> -h <height> -f <file>
+pxed -w <width> -h <height> -f <file> [-s <scale>]
 ```
 
 | flag | description |
@@ -24,15 +24,37 @@ pxed -w <width> -h <height> -f <file>
 | `-w` | canvas width in cells (1–1024) |
 | `-h` | canvas height in cells (1–1024) |
 | `-f` | path to the `.px` save file (created if it does not exist) |
+| `-s` | optional initial window scale multiplier (0.1–64, default: 1; fractional values allowed) |
+| `--help` | print command usage and keyboard shortcuts |
 
 **Example**
 
 ```sh
-pxed -w 160 -h 160 -f "my_pixel_art.px"
+pxed -w 160 -h 160 -f "my_pixel_art.px" -s 2
 ```
 
-- **Left-click** a cell to flip its value (black ↔ white).
-- The drawing is **auto-saved** when the window is closed.
+- Press **P** for Pencil, **E** for Eraser, and **S** for Selection.
+
+### Keyboard shortcuts
+
+| key | action |
+|-----|--------|
+| `P` | select Pencil tool (clears clipboard brush) |
+| `E` | select Eraser tool (clears clipboard brush) |
+| `S` | select Selection tool (clears clipboard brush) |
+| `+` / `-` | increase / decrease brush size (pencil/eraser) |
+| Left drag (P/E) | paint continuously |
+| Left drag (S) | define selection rectangle (starts at 1x1, stretches while dragging) |
+| Left release (S) | auto-copy selection and switch to Clipboard Brush |
+| Left click (Clipboard Brush) | paste/stamp clipboard at cursor |
+| Mouse wheel | zoom camera |
+| Ctrl `+` / Ctrl `-` | zoom camera in/out |
+| Arrow keys | pan camera |
+| `R` | reset camera zoom/position |
+| `G` | toggle grid visibility |
+
+- Clipboard Brush preview is centered on the cursor.
+- Drawing is auto-saved when the window is closed.
 
 ## File format
 
