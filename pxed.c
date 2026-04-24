@@ -25,11 +25,12 @@
 typedef enum Tool {
     TOOL_PENCIL    = 0,
     TOOL_ERASER    = 1,
-    TOOL_SELECT    = 2,
-    TOOL_CLIPBOARD = 3,
-    TOOL_LINE      = 4,
-    TOOL_FILL      = 5,
-    TOOL_RECT      = 6
+    TOOL_COPY      = 2,
+    TOOL_CUT       = 3,
+    TOOL_CLIPBOARD = 4,
+    TOOL_LINE      = 5,
+    TOOL_FILL      = 6,
+    TOOL_RECT      = 7
 } Tool;
 
 typedef struct {
@@ -78,9 +79,10 @@ static inline void tool_overlay_colors(Tool tool, Color *fill, Color *outline) {
     switch (tool) {
         case TOOL_PENCIL:    *fill = (Color){ 32,  32,  32,  95 }; *outline = (Color){ 44,  44,  44, 220 }; break;
         case TOOL_ERASER:    *fill = (Color){255, 255, 255, 140 }; *outline = (Color){150, 150, 150, 230 }; break;
-        case TOOL_SELECT:    *fill = (Color){  0, 200, 100,  35 }; *outline = (Color){  0, 180,  90, 220 }; break;
+        case TOOL_COPY:      *fill = (Color){  0, 200, 100,  35 }; *outline = (Color){  0, 180,  90, 220 }; break;
+        case TOOL_CUT:       *fill = (Color){200,  50,  50,  35 }; *outline = (Color){180,  20,  20, 220 }; break;
         case TOOL_CLIPBOARD: *fill = (Color){  0, 150, 255,  80 }; *outline = (Color){  0, 100, 210, 220 }; break;
-        case TOOL_LINE:      *fill = (Color){230,  70,  70, 120 }; *outline = (Color){180,  40,  40, 230 }; break;
+        case TOOL_LINE:      *fill = (Color){255, 165,   0, 120 }; *outline = (Color){220, 120,   0, 230 }; break;
         case TOOL_FILL:      *fill = (Color){165,  85, 220, 120 }; *outline = (Color){120,  55, 175, 230 }; break;
         case TOOL_RECT:      *fill = (Color){255, 220,  70, 120 }; *outline = (Color){200, 160,  30, 230 }; break;
     }
@@ -428,13 +430,18 @@ static void update_camera(AppState *s, Vector2 mouse, int ctrl_down) {
     s->cam.target.y = clampf(s->cam.target.y, min_y, max_y);
 }
 
-static void handle_keys(AppState *s, int ctrl_down, int w, int h, uint8_t *grid, History *hist) {
+static void handle_keys(AppState *s, int ctrl_down, int w, int h, uint8_t *grid, History *hist, const char *fpath) {
     int max_brush = (w < h) ? w : h;
     int key;
     while ((key = GetKeyPressed()) != KEY_NULL) {
         switch (key) {
             case KEY_G:
                 s->show_grid = !s->show_grid;
+                break;
+            case KEY_S:
+                if (ctrl_down) {
+                    save_grid(fpath, grid, w, h);
+                }
                 break;
             case KEY_Z:
                 if (ctrl_down) {
@@ -454,7 +461,8 @@ static void handle_keys(AppState *s, int ctrl_down, int w, int h, uint8_t *grid,
                 break;
             case KEY_P: SWITCH_TOOL(s, TOOL_PENCIL); break;
             case KEY_E: SWITCH_TOOL(s, TOOL_ERASER); break;
-            case KEY_S: SWITCH_TOOL(s, TOOL_SELECT); break;
+            case KEY_C: SWITCH_TOOL(s, TOOL_COPY);   break;
+            case KEY_X: SWITCH_TOOL(s, TOOL_CUT);    break;
             case KEY_L: SWITCH_TOOL(s, TOOL_LINE);   break;
             case KEY_F: SWITCH_TOOL(s, TOOL_FILL);   break;
             case KEY_R:
@@ -477,7 +485,8 @@ static void handle_mouse(AppState *s, uint8_t *grid, Vector2 mouse, int w, int h
     int cp = s->cell_px;
 
     switch (s->active_tool) {
-        case TOOL_SELECT:
+        case TOOL_COPY:
+        case TOOL_CUT:
             if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                 s->selecting = 0;
                 Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
@@ -506,6 +515,17 @@ static void handle_mouse(AppState *s, uint8_t *grid, Vector2 mouse, int w, int h
                 int sw = abs(s->sel_end_x - s->sel_start_x) + 1;
                 int sh = abs(s->sel_end_y - s->sel_start_y) + 1;
                 clipboard_copy(&s->clipboard, grid, w, h, sx, sy, sw, sh);
+                if (s->active_tool == TOOL_CUT) {
+                    history_record(hist, grid);
+                    /* Clear the selected region */
+                    for (int by = 0; by < sh; by++) {
+                        for (int bx = 0; bx < sw; bx++) {
+                            int gx = sx + bx, gy = sy + by;
+                            if (gx >= 0 && gx < w && gy >= 0 && gy < h)
+                                grid[gy * w + gx] = 0;
+                        }
+                    }
+                }
                 s->selecting   = 0;
                 s->active_tool = TOOL_CLIPBOARD;
             }
@@ -665,8 +685,9 @@ static void draw_frame(const AppState *s, const uint8_t *grid, Vector2 mouse, in
 
     /* per-tool overlays */
     switch (s->active_tool) {
-        case TOOL_SELECT: {
-            /* selection cursor: 1x1 at rest, stretches while dragging */
+        case TOOL_COPY:
+        case TOOL_CUT: {
+            /* selection rectangle: 1x1 at rest, stretches while dragging */
             Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
             if (mp.x >= 0 && mp.y >= 0) {
                 int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
@@ -784,14 +805,15 @@ static void usage(FILE *out, int code) {
     fprintf(out, "  -s <scale>   initial window scale multiplier (%.1f-%.1f, fractional allowed)\n", MIN_SCALE, MAX_SCALE);
     fprintf(out, "  --help, -?   show this help and exit\n\n");
     fprintf(out, "keyboard shortcuts:\n");
-    fprintf(out, "  P / E / S / L / F / R\n");
-    fprintf(out, "               pencil / eraser / selection / line / fill / rect\n");
+    fprintf(out, "  P / E / C / X / L / R / F\n");
+    fprintf(out, "               pencil / eraser / copy / cut / line / rect / fill\n");
     fprintf(out, "  + / -        increase / decrease brush size (pencil/eraser)\n");
     fprintf(out, "  G            toggle checkerboard background\n");
+    fprintf(out, "  Arrow Keys   pan camera\n");
     fprintf(out, "  Mouse Wheel  zoom camera\n");
     fprintf(out, "  Ctrl + / -   zoom in/out\n");
-    fprintf(out, "  Arrow Keys   pan camera\n");
     fprintf(out, "  Ctrl + R     reset camera\n");
+    fprintf(out, "  Ctrl + S     save file\n");
     fprintf(out, "  Ctrl + Z / Y undo / redo\n");
     exit(code);
 }
@@ -868,7 +890,7 @@ int main(int argc, char **argv) {
         Vector2 mouse     = GetMousePosition();
         int     ctrl_down = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
         update_camera(&s, mouse, ctrl_down);
-        handle_keys(&s, ctrl_down, w, h, grid, &hist);
+        handle_keys(&s, ctrl_down, w, h, grid, &hist, fpath);
         handle_mouse(&s, grid, mouse, w, h, &hist);
         draw_frame(&s, grid, mouse, w, h);
     }
