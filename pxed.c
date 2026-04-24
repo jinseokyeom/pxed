@@ -58,7 +58,7 @@ typedef struct {
     int      n;
 } History;
 
-static float clampf(float v, float lo, float hi) {
+static inline float clampf(float v, float lo, float hi) {
     if (v < lo) return lo;
     if (v > hi) return hi;
     return v;
@@ -201,17 +201,17 @@ static int history_push_snapshot(uint8_t **stack, int *count, int n, const uint8
     return 1;
 }
 
-static void history_init(History *h, int n) {
+static inline void history_init(History *h, int n) {
     memset(h, 0, sizeof(*h));
     h->n = n;
 }
 
-static void history_free(History *h) {
+static inline void history_free(History *h) {
     history_clear_stack(h->undo, &h->undo_count);
     history_clear_stack(h->redo, &h->redo_count);
 }
 
-static void history_record(History *h, const uint8_t *grid) {
+static inline void history_record(History *h, const uint8_t *grid) {
     if (!history_push_snapshot(h->undo, &h->undo_count, h->n, grid)) return;
     history_clear_stack(h->redo, &h->redo_count);
 }
@@ -297,7 +297,7 @@ static void clipboard_copy(Clipboard *clip, const uint8_t *grid, int grid_w, int
     }
 }
 
-static void clipboard_free(Clipboard *clip) {
+static inline void clipboard_free(Clipboard *clip) {
     if (clip->data) { free(clip->data); clip->data = NULL; }
     clip->w = clip->h = 0;
 }
@@ -337,210 +337,220 @@ static void update_camera(AppState *s, Vector2 mouse, int ctrl_down) {
 }
 
 static void handle_keys(AppState *s, int ctrl_down, int w, int h, uint8_t *grid, History *hist) {
-    if (IsKeyPressed(KEY_G))
-        s->show_grid = !s->show_grid;
-
-    if (ctrl_down && IsKeyPressed(KEY_Z)) {
-        history_undo(hist, grid);
-        s->line_pending = 0;
-        s->rect_pending = 0;
-        s->selecting = 0;
-    }
-    if (ctrl_down && IsKeyPressed(KEY_Y)) {
-        history_redo(hist, grid);
-        s->line_pending = 0;
-        s->rect_pending = 0;
-        s->selecting = 0;
-    }
-    if (IsKeyPressed(KEY_P)) {
-        s->active_tool = TOOL_PENCIL;
-        s->line_pending = 0;
-        s->rect_pending = 0;
-        s->selecting   = 0;
-        clipboard_free(&s->clipboard);
-    }
-    if (IsKeyPressed(KEY_E)) {
-        s->active_tool = TOOL_ERASER;
-        s->line_pending = 0;
-        s->rect_pending = 0;
-        s->selecting   = 0;
-        clipboard_free(&s->clipboard);
-    }
-    if (IsKeyPressed(KEY_S)) {
-        s->active_tool = TOOL_SELECT;
-        s->line_pending = 0;
-        s->rect_pending = 0;
-        s->selecting   = 0;
-        clipboard_free(&s->clipboard);
-    }
-    if (IsKeyPressed(KEY_L)) {
-        s->active_tool = TOOL_LINE;
-        s->line_pending = 0;
-        s->rect_pending = 0;
-        s->selecting   = 0;
-        clipboard_free(&s->clipboard);
-    }
-    if (IsKeyPressed(KEY_F)) {
-        s->active_tool = TOOL_FILL;
-        s->line_pending = 0;
-        s->rect_pending = 0;
-        s->selecting   = 0;
-        clipboard_free(&s->clipboard);
-    }
-    if (!ctrl_down && IsKeyPressed(KEY_R)) {
-        s->active_tool = TOOL_RECT;
-        s->line_pending = 0;
-        s->rect_pending = 0;
-        s->selecting   = 0;
-        clipboard_free(&s->clipboard);
-    }
-
-    if (!ctrl_down) {
-        int max_brush = (w < h) ? w : h;
-        if ((IsKeyPressed(KEY_EQUAL) || IsKeyPressed(KEY_KP_ADD))      && s->brush_size < max_brush) s->brush_size++;
-        if ((IsKeyPressed(KEY_MINUS) || IsKeyPressed(KEY_KP_SUBTRACT)) && s->brush_size > 1)         s->brush_size--;
+    int max_brush = (w < h) ? w : h;
+    int key;
+    while ((key = GetKeyPressed()) != KEY_NULL) {
+        switch (key) {
+            case KEY_G:
+                s->show_grid = !s->show_grid;
+                break;
+            case KEY_Z:
+                if (ctrl_down) {
+                    history_undo(hist, grid);
+                    s->line_pending = 0;
+                    s->rect_pending = 0;
+                    s->selecting    = 0;
+                }
+                break;
+            case KEY_Y:
+                if (ctrl_down) {
+                    history_redo(hist, grid);
+                    s->line_pending = 0;
+                    s->rect_pending = 0;
+                    s->selecting    = 0;
+                }
+                break;
+            case KEY_P:
+                s->active_tool  = TOOL_PENCIL;
+                s->line_pending = 0; s->rect_pending = 0; s->selecting = 0;
+                clipboard_free(&s->clipboard);
+                break;
+            case KEY_E:
+                s->active_tool  = TOOL_ERASER;
+                s->line_pending = 0; s->rect_pending = 0; s->selecting = 0;
+                clipboard_free(&s->clipboard);
+                break;
+            case KEY_S:
+                s->active_tool  = TOOL_SELECT;
+                s->line_pending = 0; s->rect_pending = 0; s->selecting = 0;
+                clipboard_free(&s->clipboard);
+                break;
+            case KEY_L:
+                s->active_tool  = TOOL_LINE;
+                s->line_pending = 0; s->rect_pending = 0; s->selecting = 0;
+                clipboard_free(&s->clipboard);
+                break;
+            case KEY_F:
+                s->active_tool  = TOOL_FILL;
+                s->line_pending = 0; s->rect_pending = 0; s->selecting = 0;
+                clipboard_free(&s->clipboard);
+                break;
+            case KEY_R:
+                if (!ctrl_down) {
+                    s->active_tool  = TOOL_RECT;
+                    s->line_pending = 0; s->rect_pending = 0; s->selecting = 0;
+                    clipboard_free(&s->clipboard);
+                }
+                break;
+            case KEY_EQUAL:
+            case KEY_KP_ADD:
+                if (!ctrl_down && s->brush_size < max_brush) s->brush_size++;
+                break;
+            case KEY_MINUS:
+            case KEY_KP_SUBTRACT:
+                if (!ctrl_down && s->brush_size > 1) s->brush_size--;
+                break;
+            default: break;
+        }
     }
 }
 
 static void handle_mouse(AppState *s, uint8_t *grid, Vector2 mouse, int w, int h, History *hist) {
     int cp = s->cell_px;
 
-    if (s->active_tool == TOOL_SELECT) {
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            s->selecting = 0;
-            Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
-            if (mp.x >= 0 && mp.y >= 0) {
-                int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
-                if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
-                    s->selecting       = 1;
-                    s->sel_start_x     = s->sel_end_x = cx;
-                    s->sel_start_y     = s->sel_end_y = cy;
-                }
-            }
-        }
-        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && s->selecting) {
-            Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
-            if (mp.x >= 0 && mp.y >= 0) {
-                int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
-                if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
-                    s->sel_end_x = cx;
-                    s->sel_end_y = cy;
-                }
-            }
-        }
-        if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT) && s->selecting) {
-            int sx = (s->sel_start_x < s->sel_end_x) ? s->sel_start_x : s->sel_end_x;
-            int sy = (s->sel_start_y < s->sel_end_y) ? s->sel_start_y : s->sel_end_y;
-            int sw = abs(s->sel_end_x - s->sel_start_x) + 1;
-            int sh = abs(s->sel_end_y - s->sel_start_y) + 1;
-            clipboard_copy(&s->clipboard, grid, w, h, sx, sy, sw, sh);
-            s->selecting   = 0;
-            s->active_tool = TOOL_CLIPBOARD;
-        }
-    } else if (s->active_tool == TOOL_CLIPBOARD) {
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && s->clipboard.data) {
-            Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
-            if (mp.x >= 0 && mp.y >= 0) {
-                history_record(hist, grid);
-                int base_x = (int)(mp.x / cp) - s->clipboard.w / 2;
-                int base_y = (int)(mp.y / cp) - s->clipboard.h / 2;
-                for (int by = 0; by < s->clipboard.h; by++)
-                    for (int bx = 0; bx < s->clipboard.w; bx++) {
-                        int gx = base_x + bx, gy = base_y + by;
-                        if (gx >= 0 && gx < w && gy >= 0 && gy < h
-                            && s->clipboard.data[by * s->clipboard.w + bx])
-                            grid[gy * w + gx] = 1;
-                    }
-            }
-        }
-    } else if (s->active_tool == TOOL_LINE) {
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
-            if (mp.x >= 0 && mp.y >= 0) {
-                int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
-                if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
-                    if (!s->line_pending) {
-                        s->line_start_x = cx;
-                        s->line_start_y = cy;
-                        s->line_pending = 1;
-                    } else {
-                        history_record(hist, grid);
-                        raster_line_to_grid(grid, w, h, s->line_start_x, s->line_start_y, cx, cy, 1);
-                        s->line_pending = 0;
+    switch (s->active_tool) {
+        case TOOL_SELECT:
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                s->selecting = 0;
+                Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
+                if (mp.x >= 0 && mp.y >= 0) {
+                    int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
+                    if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
+                        s->selecting       = 1;
+                        s->sel_start_x     = s->sel_end_x = cx;
+                        s->sel_start_y     = s->sel_end_y = cy;
                     }
                 }
             }
-        }
-    } else if (s->active_tool == TOOL_RECT) {
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
-            if (mp.x >= 0 && mp.y >= 0) {
-                int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
-                if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
-                    if (!s->rect_pending) {
-                        s->rect_start_x = cx;
-                        s->rect_start_y = cy;
-                        s->rect_pending = 1;
-                    } else {
-                        history_record(hist, grid);
-                        raster_rect_to_grid(grid, w, h, s->rect_start_x, s->rect_start_y, cx, cy, 1);
-                        s->rect_pending = 0;
+            if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && s->selecting) {
+                Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
+                if (mp.x >= 0 && mp.y >= 0) {
+                    int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
+                    if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
+                        s->sel_end_x = cx;
+                        s->sel_end_y = cy;
                     }
                 }
             }
-        }
-    } else if (s->active_tool == TOOL_FILL) {
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
-            if (mp.x >= 0 && mp.y >= 0) {
-                int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
-                if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
-                    if (grid[cy * w + cx] != 1) {
-                        history_record(hist, grid);
-                        flood_fill(grid, w, h, cx, cy, 1);
-                    }
-                }
+            if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT) && s->selecting) {
+                int sx = (s->sel_start_x < s->sel_end_x) ? s->sel_start_x : s->sel_end_x;
+                int sy = (s->sel_start_y < s->sel_end_y) ? s->sel_start_y : s->sel_end_y;
+                int sw = abs(s->sel_end_x - s->sel_start_x) + 1;
+                int sh = abs(s->sel_end_y - s->sel_start_y) + 1;
+                clipboard_copy(&s->clipboard, grid, w, h, sx, sy, sw, sh);
+                s->selecting   = 0;
+                s->active_tool = TOOL_CLIPBOARD;
             }
-        }
-    } else {
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            s->stroke_active = 0;
-            s->last_brush_cx = s->last_brush_cy = -1;
-            Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
-            if (mp.x >= 0 && mp.y >= 0) {
-                int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
-                if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
-                    s->stroke_value  = (s->active_tool == TOOL_PENCIL) ? 1 : 0;
-                    s->stroke_active = 1;
+            break;
+        case TOOL_CLIPBOARD:
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && s->clipboard.data) {
+                Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
+                if (mp.x >= 0 && mp.y >= 0) {
                     history_record(hist, grid);
+                    int base_x = (int)(mp.x / cp) - s->clipboard.w / 2;
+                    int base_y = (int)(mp.y / cp) - s->clipboard.h / 2;
+                    for (int by = 0; by < s->clipboard.h; by++)
+                        for (int bx = 0; bx < s->clipboard.w; bx++) {
+                            int gx = base_x + bx, gy = base_y + by;
+                            if (gx >= 0 && gx < w && gy >= 0 && gy < h
+                                && s->clipboard.data[by * s->clipboard.w + bx])
+                                grid[gy * w + gx] = 1;
+                        }
                 }
             }
-        }
-        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && s->stroke_active) {
-            Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
-            if (mp.x >= 0 && mp.y >= 0) {
-                int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
-                if (cx >= 0 && cx < w && cy >= 0 && cy < h
-                    && (cx != s->last_brush_cx || cy != s->last_brush_cy)) {
-                    int bx0 = cx - s->brush_size / 2;
-                    int by0 = cy - s->brush_size / 2;
-                    for (int by = 0; by < s->brush_size; by++) {
-                        int gy = by0 + by;
-                        if (gy < 0 || gy >= h) continue;
-                        for (int bx = 0; bx < s->brush_size; bx++) {
-                            int gx = bx0 + bx;
-                            if (gx >= 0 && gx < w)
-                                grid[gy * w + gx] = s->stroke_value;
+            break;
+        case TOOL_LINE:
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
+                if (mp.x >= 0 && mp.y >= 0) {
+                    int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
+                    if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
+                        if (!s->line_pending) {
+                            s->line_start_x = cx;
+                            s->line_start_y = cy;
+                            s->line_pending = 1;
+                        } else {
+                            history_record(hist, grid);
+                            raster_line_to_grid(grid, w, h, s->line_start_x, s->line_start_y, cx, cy, 1);
+                            s->line_pending = 0;
                         }
                     }
-                    s->last_brush_cx = cx;
-                    s->last_brush_cy = cy;
                 }
             }
-        } else if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-            s->stroke_active = 0;
-            s->last_brush_cx = s->last_brush_cy = -1;
-        }
+            break;
+        case TOOL_RECT:
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
+                if (mp.x >= 0 && mp.y >= 0) {
+                    int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
+                    if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
+                        if (!s->rect_pending) {
+                            s->rect_start_x = cx;
+                            s->rect_start_y = cy;
+                            s->rect_pending = 1;
+                        } else {
+                            history_record(hist, grid);
+                            raster_rect_to_grid(grid, w, h, s->rect_start_x, s->rect_start_y, cx, cy, 1);
+                            s->rect_pending = 0;
+                        }
+                    }
+                }
+            }
+            break;
+        case TOOL_FILL:
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
+                if (mp.x >= 0 && mp.y >= 0) {
+                    int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
+                    if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
+                        if (grid[cy * w + cx] != 1) {
+                            history_record(hist, grid);
+                            flood_fill(grid, w, h, cx, cy, 1);
+                        }
+                    }
+                }
+            }
+            break;
+        default: /* TOOL_PENCIL, TOOL_ERASER */
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                s->stroke_active = 0;
+                s->last_brush_cx = s->last_brush_cy = -1;
+                Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
+                if (mp.x >= 0 && mp.y >= 0) {
+                    int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
+                    if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
+                        s->stroke_value  = (s->active_tool == TOOL_PENCIL) ? 1 : 0;
+                        s->stroke_active = 1;
+                        history_record(hist, grid);
+                    }
+                }
+            }
+            if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && s->stroke_active) {
+                Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
+                if (mp.x >= 0 && mp.y >= 0) {
+                    int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
+                    if (cx >= 0 && cx < w && cy >= 0 && cy < h
+                        && (cx != s->last_brush_cx || cy != s->last_brush_cy)) {
+                        int bx0 = cx - s->brush_size / 2;
+                        int by0 = cy - s->brush_size / 2;
+                        for (int by = 0; by < s->brush_size; by++) {
+                            int gy = by0 + by;
+                            if (gy < 0 || gy >= h) continue;
+                            for (int bx = 0; bx < s->brush_size; bx++) {
+                                int gx = bx0 + bx;
+                                if (gx >= 0 && gx < w)
+                                    grid[gy * w + gx] = s->stroke_value;
+                            }
+                        }
+                        s->last_brush_cx = cx;
+                        s->last_brush_cy = cy;
+                    }
+                }
+            } else if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+                s->stroke_active = 0;
+                s->last_brush_cx = s->last_brush_cy = -1;
+            }
+            break;
     }
 
 }
@@ -564,84 +574,97 @@ static void draw_frame(const AppState *s, const uint8_t *grid, Vector2 mouse, in
         for (int y = 0; y <= h; y++) DrawLine(0, y * cp, s->canvas_w, y * cp, LIGHTGRAY);
     }
 
-    /* selection cursor: 1x1 at rest, stretches while dragging */
-    if (s->active_tool == TOOL_SELECT) {
-        Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
-        if (mp.x >= 0 && mp.y >= 0) {
-            int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
-            if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
-                int sx = cx, sy = cy, sw = 1, sh = 1;
-                if (s->selecting) {
-                    sx = (s->sel_start_x < s->sel_end_x) ? s->sel_start_x : s->sel_end_x;
-                    sy = (s->sel_start_y < s->sel_end_y) ? s->sel_start_y : s->sel_end_y;
-                    sw = abs(s->sel_end_x - s->sel_start_x) + 1;
-                    sh = abs(s->sel_end_y - s->sel_start_y) + 1;
+    /* per-tool overlays */
+    switch (s->active_tool) {
+        case TOOL_SELECT: {
+            /* selection cursor: 1x1 at rest, stretches while dragging */
+            Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
+            if (mp.x >= 0 && mp.y >= 0) {
+                int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
+                if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
+                    int sx = cx, sy = cy, sw = 1, sh = 1;
+                    if (s->selecting) {
+                        sx = (s->sel_start_x < s->sel_end_x) ? s->sel_start_x : s->sel_end_x;
+                        sy = (s->sel_start_y < s->sel_end_y) ? s->sel_start_y : s->sel_end_y;
+                        sw = abs(s->sel_end_x - s->sel_start_x) + 1;
+                        sh = abs(s->sel_end_y - s->sel_start_y) + 1;
+                    }
+                    Rectangle sr = { sx * cp, sy * cp, sw * cp, sh * cp };
+                    DrawRectangleRec(sr,           (Color){  0, 200, 100,  30 });
+                    DrawRectangleLinesEx(sr, 2.0f, (Color){  0, 200, 100, 200 });
                 }
-                Rectangle sr = { sx * cp, sy * cp, sw * cp, sh * cp };
-                DrawRectangleRec(sr,           (Color){  0, 200, 100,  30 });
-                DrawRectangleLinesEx(sr, 2.0f, (Color){  0, 200, 100, 200 });
             }
+            break;
         }
-    }
-
-    /* clipboard paste preview (clipboard brush only) */
-    if (s->active_tool == TOOL_CLIPBOARD && s->clipboard.data) {
-        Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
-        int bx0 = (int)(mp.x / cp) - s->clipboard.w / 2;
-        int by0 = (int)(mp.y / cp) - s->clipboard.h / 2;
-        Rectangle pr = { bx0 * cp, by0 * cp, s->clipboard.w * cp, s->clipboard.h * cp };
-        DrawRectangleRec(pr,           (Color){   0, 150, 255,  80 });
-        DrawRectangleLinesEx(pr, 2.0f, (Color){   0, 100, 200, 200 });
-        for (int by = 0; by < s->clipboard.h; by++)
-            for (int bx = 0; bx < s->clipboard.w; bx++)
-                if (s->clipboard.data[by * s->clipboard.w + bx]) {
-                    int px = bx0 + bx, py = by0 + by;
-                    if (px >= 0 && px < w && py >= 0 && py < h)
-                        DrawRectangle(px * cp, py * cp, cp, cp, (Color){ 100, 200, 255, 120 });
+        case TOOL_CLIPBOARD:
+            /* clipboard paste preview */
+            if (s->clipboard.data) {
+                Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
+                int bx0 = (int)(mp.x / cp) - s->clipboard.w / 2;
+                int by0 = (int)(mp.y / cp) - s->clipboard.h / 2;
+                Rectangle pr = { bx0 * cp, by0 * cp, s->clipboard.w * cp, s->clipboard.h * cp };
+                DrawRectangleRec(pr,           (Color){   0, 150, 255,  80 });
+                DrawRectangleLinesEx(pr, 2.0f, (Color){   0, 100, 200, 200 });
+                for (int by = 0; by < s->clipboard.h; by++)
+                    for (int bx = 0; bx < s->clipboard.w; bx++)
+                        if (s->clipboard.data[by * s->clipboard.w + bx]) {
+                            int px = bx0 + bx, py = by0 + by;
+                            if (px >= 0 && px < w && py >= 0 && py < h)
+                                DrawRectangle(px * cp, py * cp, cp, cp, (Color){ 100, 200, 255, 120 });
+                        }
+            }
+            break;
+        case TOOL_LINE:
+            /* line preview from first click to current cursor */
+            if (s->line_pending) {
+                Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
+                if (mp.x >= 0 && mp.y >= 0) {
+                    int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
+                    if (cx >= 0 && cx < w && cy >= 0 && cy < h)
+                        raster_line_overlay(w, h, cp, s->line_start_x, s->line_start_y, cx, cy, (Color){ 0, 0, 0, 110 });
                 }
-    }
-
-    /* line preview from first click to current cursor */
-    if (s->active_tool == TOOL_LINE && s->line_pending) {
-        Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
-        if (mp.x >= 0 && mp.y >= 0) {
-            int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
-            if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
-                raster_line_overlay(w, h, cp, s->line_start_x, s->line_start_y, cx, cy, (Color){ 0, 0, 0, 110 });
             }
-        }
-    }
-
-    /* rectangle preview from first click to current cursor */
-    if (s->active_tool == TOOL_RECT && s->rect_pending) {
-        Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
-        if (mp.x >= 0 && mp.y >= 0) {
-            int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
-            if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
-                raster_rect_overlay(w, h, cp, s->rect_start_x, s->rect_start_y, cx, cy, (Color){ 0, 0, 0, 110 });
+            break;
+        case TOOL_RECT:
+            /* rectangle preview from first click to current cursor */
+            if (s->rect_pending) {
+                Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
+                if (mp.x >= 0 && mp.y >= 0) {
+                    int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
+                    if (cx >= 0 && cx < w && cy >= 0 && cy < h)
+                        raster_rect_overlay(w, h, cp, s->rect_start_x, s->rect_start_y, cx, cy, (Color){ 0, 0, 0, 110 });
+                }
             }
-        }
+            break;
+        default: break;
     }
 
     /* brush cursor (pencil/eraser/line/fill/rect) */
-    if (s->active_tool == TOOL_PENCIL || s->active_tool == TOOL_ERASER
-        || s->active_tool == TOOL_LINE || s->active_tool == TOOL_FILL || s->active_tool == TOOL_RECT) {
-        Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
-        if (mp.x >= 0 && mp.y >= 0) {
-            int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
-            if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
-                int bsz = (s->active_tool == TOOL_LINE || s->active_tool == TOOL_FILL || s->active_tool == TOOL_RECT)
-                    ? 1 : s->brush_size;
-                int bx0 = cx - bsz / 2;
-                int by0 = cy - bsz / 2;
-                Rectangle br = { bx0 * cp, by0 * cp, bsz * cp, bsz * cp };
-                Color ov = (s->active_tool == TOOL_ERASER)
-                    ? (Color){ 255, 255, 255, 120 }
-                    : (Color){ 0, 0, 0, 90 };
-                DrawRectangleRec(br, ov);
-                DrawRectangleLinesEx(br, 2.0f, DARKGRAY);
+    switch (s->active_tool) {
+        case TOOL_PENCIL:
+        case TOOL_ERASER:
+        case TOOL_LINE:
+        case TOOL_FILL:
+        case TOOL_RECT: {
+            Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
+            if (mp.x >= 0 && mp.y >= 0) {
+                int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
+                if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
+                    int bsz = (s->active_tool == TOOL_LINE || s->active_tool == TOOL_FILL || s->active_tool == TOOL_RECT)
+                        ? 1 : s->brush_size;
+                    int bx0 = cx - bsz / 2;
+                    int by0 = cy - bsz / 2;
+                    Rectangle br = { bx0 * cp, by0 * cp, bsz * cp, bsz * cp };
+                    Color ov = (s->active_tool == TOOL_ERASER)
+                        ? (Color){ 255, 255, 255, 120 }
+                        : (Color){ 0, 0, 0, 90 };
+                    DrawRectangleRec(br, ov);
+                    DrawRectangleLinesEx(br, 2.0f, DARKGRAY);
+                }
             }
+            break;
         }
+        default: break;
     }
 
     EndMode2D();
@@ -658,20 +681,14 @@ static void usage(FILE *out, int code) {
     fprintf(out, "  --help, -?   show this help and exit\n\n");
     fprintf(out, "keyboard shortcuts:\n");
     fprintf(out, "  P / E / S / L / F / R\n");
-    fprintf(out, "               select pencil / eraser / selection / line / fill / rect\n");
+    fprintf(out, "               pencil / eraser / selection / line / fill / rect\n");
     fprintf(out, "  + / -        increase / decrease brush size (pencil/eraser)\n");
-    fprintf(out, "  Left Drag    paint / select region\n");
-    fprintf(out, "  Release Drag auto-copy selection (switches to clipboard brush)\n");
-    fprintf(out, "  Left Click   paste clipboard brush at cursor\n");
-    fprintf(out, "  Line Tool    click once to start, click again to commit line\n");
-    fprintf(out, "  Fill Tool    click a cell to flood fill contiguous region\n");
-    fprintf(out, "  Rect Tool    click once to start, click again to commit rectangle\n");
+    fprintf(out, "  G            toggle grid\n");
     fprintf(out, "  Mouse Wheel  zoom camera\n");
     fprintf(out, "  Ctrl + / -   zoom in/out\n");
-    fprintf(out, "  Ctrl + Z / Y undo / redo\n");
     fprintf(out, "  Arrow Keys   pan camera\n");
     fprintf(out, "  Ctrl + R     reset camera\n");
-    fprintf(out, "  G            toggle grid\n");
+    fprintf(out, "  Ctrl + Z / Y undo / redo\n");
     exit(code);
 }
 
