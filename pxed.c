@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include "raylib.h"
 
 #define CELL_PX         6
@@ -762,7 +763,7 @@ static void usage(FILE *out, int code) {
     fprintf(out, "options:\n");
     fprintf(out, "  -w <width>   canvas width in cells (1-%d)\n", MAX_DIM);
     fprintf(out, "  -h <height>  canvas height in cells (1-%d)\n", MAX_DIM);
-    fprintf(out, "  -f <file>    path to the .px save file\n");
+    fprintf(out, "  -f <file>    path to the .px save file (default: untitled.px)\n");
     fprintf(out, "  -s <scale>   initial window scale multiplier (%.1f-%.1f, fractional allowed)\n", MIN_SCALE, MAX_SCALE);
     fprintf(out, "  --help, -?   show this help and exit\n\n");
     fprintf(out, "keyboard shortcuts:\n");
@@ -796,7 +797,17 @@ int main(int argc, char **argv) {
     }
     if (w < MIN_DIM || w > MAX_DIM) { fprintf(stderr, "pxed: width must be 1-%d\n",  MAX_DIM); return 1; }
     if (h < MIN_DIM || h > MAX_DIM) { fprintf(stderr, "pxed: height must be 1-%d\n", MAX_DIM); return 1; }
-    if (!fpath)                      { fprintf(stderr, "pxed: -f <file> required\n");            return 1; }
+    static char default_path[32];
+    if (!fpath) {
+        if (access("untitled.px", F_OK) != 0) {
+            fpath = "untitled.px";
+        } else {
+            for (int i = 1; ; i++) {
+                snprintf(default_path, sizeof(default_path), "untitled_%d.px", i);
+                if (access(default_path, F_OK) != 0) { fpath = default_path; break; }
+            }
+        }
+    }
     if (scale < MIN_SCALE || scale > MAX_SCALE) {
         fprintf(stderr, "pxed: scale must be %.1f-%.1f\n", MIN_SCALE, MAX_SCALE);
         return 1;
