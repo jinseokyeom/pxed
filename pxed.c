@@ -5,13 +5,14 @@
 #include <unistd.h>
 #include "raylib.h"
 
-#define CELL_PX         6
-#define MIN_DIM         1
-#define MAX_DIM         1024
-#define MIN_SCALE       0.1f
-#define MAX_SCALE       64.0f
-#define HEADER          "PX"
-#define HISTORY_LIMIT   64
+#define CELL_PX             6
+#define MIN_DIM             1
+#define MAX_DIM             1024
+#define MIN_SCALE           0.1f
+#define MAX_SCALE           64.0f
+#define HEADER              "PX"
+#define HISTORY_LIMIT       64
+#define BOUND_BUFFER_CELLS  8
 
 #define SWITCH_TOOL(s, t) do {          \
     (s)->active_tool  = (t);            \
@@ -405,10 +406,26 @@ static void update_camera(AppState *s, Vector2 mouse, int ctrl_down) {
 
     float hvw = (float)s->win_w / (2.0f * s->cam.zoom);
     float hvh = (float)s->win_h / (2.0f * s->cam.zoom);
-    s->cam.target.x = ((float)s->canvas_w > 2.0f * hvw)
-        ? clampf(s->cam.target.x, hvw, (float)s->canvas_w - hvw) : s->canvas_w * 0.5f;
-    s->cam.target.y = ((float)s->canvas_h > 2.0f * hvh)
-        ? clampf(s->cam.target.y, hvh, (float)s->canvas_h - hvh) : s->canvas_h * 0.5f;
+    float buffer = (float)(BOUND_BUFFER_CELLS * s->cell_px);
+
+    float min_x = hvw - buffer;
+    float max_x = (float)s->canvas_w - hvw + buffer;
+    float min_y = hvh - buffer;
+    float max_y = (float)s->canvas_h - hvh + buffer;
+
+    if (min_x > max_x) {
+        float mid_x = s->canvas_w * 0.5f;
+        min_x = mid_x - buffer;
+        max_x = mid_x + buffer;
+    }
+    if (min_y > max_y) {
+        float mid_y = s->canvas_h * 0.5f;
+        min_y = mid_y - buffer;
+        max_y = mid_y + buffer;
+    }
+
+    s->cam.target.x = clampf(s->cam.target.x, min_x, max_x);
+    s->cam.target.y = clampf(s->cam.target.y, min_y, max_y);
 }
 
 static void handle_keys(AppState *s, int ctrl_down, int w, int h, uint8_t *grid, History *hist) {
