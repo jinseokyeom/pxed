@@ -383,8 +383,7 @@ static void update_camera(AppState *s, Vector2 mouse, int ctrl_down) {
     if (ctrl_down && (IsKeyPressed(KEY_MINUS) || IsKeyPressed(KEY_KP_SUBTRACT))) zoom_delta -= 1.0f;
 
     if (zoom_delta != 0.0f) {
-        Vector2 anchor = (zoom_delta == 1.0f || zoom_delta == -1.0f)
-            ? (Vector2){ s->win_w * 0.5f, s->win_h * 0.5f } : mouse;
+        Vector2 anchor = mouse;
         Vector2 before = GetScreenToWorld2D(anchor, s->cam);
         s->cam.zoom    = clampf(s->cam.zoom + zoom_delta * 0.1f * s->cam.zoom, 0.2f, (float)MAX_SCALE);
         Vector2 after  = GetScreenToWorld2D(anchor, s->cam);
