@@ -25,6 +25,8 @@ else
 endif
 
 TARGET = pxed
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
 
 all: $(TARGET)
 
@@ -34,4 +36,8 @@ $(TARGET): pxed.c
 clean:
 	rm -f $(TARGET)
 
-.PHONY: all clean
+install: $(TARGET)
+	install -d $(DESTDIR)$(BINDIR)
+	install -m 755 $(TARGET) $(DESTDIR)$(BINDIR)/$(TARGET)
+
+.PHONY: all clean install

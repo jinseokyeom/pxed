@@ -64,6 +64,18 @@ static inline float clampf(float v, float lo, float hi) {
     return v;
 }
 
+static inline void tool_overlay_colors(Tool tool, Color *fill, Color *outline) {
+    switch (tool) {
+        case TOOL_PENCIL:    *fill = (Color){  0,   0,   0,  95 }; *outline = (Color){ 20,  20,  20, 220 }; break;
+        case TOOL_ERASER:    *fill = (Color){255, 255, 255, 140 }; *outline = (Color){150, 150, 150, 230 }; break;
+        case TOOL_SELECT:    *fill = (Color){  0, 200, 100,  35 }; *outline = (Color){  0, 180,  90, 220 }; break;
+        case TOOL_CLIPBOARD: *fill = (Color){  0, 150, 255,  80 }; *outline = (Color){  0, 100, 210, 220 }; break;
+        case TOOL_LINE:      *fill = (Color){230,  70,  70, 120 }; *outline = (Color){180,  40,  40, 230 }; break;
+        case TOOL_FILL:      *fill = (Color){165,  85, 220, 120 }; *outline = (Color){120,  55, 175, 230 }; break;
+        case TOOL_RECT:      *fill = (Color){255, 220,  70, 120 }; *outline = (Color){200, 160,  30, 230 }; break;
+    }
+}
+
 static void raster_line_to_grid(uint8_t *grid, int w, int h, int x0, int y0, int x1, int y1, uint8_t value) {
     int dx = abs(x1 - x0), sx = (x0 < x1) ? 1 : -1;
     int dy = -abs(y1 - y0), sy = (y0 < y1) ? 1 : -1;
@@ -80,19 +92,65 @@ static void raster_line_to_grid(uint8_t *grid, int w, int h, int x0, int y0, int
     }
 }
 
-static void raster_line_overlay(int w, int h, int cp, int x0, int y0, int x1, int y1, Color color) {
+static void draw_mask_outer_outline(const uint8_t *mask, int w, int h, int cp,
+                                    Color outline, int min_x, int min_y, int max_x, int max_y) {
+    if (!mask) return;
+    if (min_x < 0) min_x = 0;
+    if (min_y < 0) min_y = 0;
+    if (max_x >= w) max_x = w - 1;
+    if (max_y >= h) max_y = h - 1;
+    if (min_x > max_x || min_y > max_y) return;
+
+    for (int y = min_y; y <= max_y; y++) {
+        for (int x = min_x; x <= max_x; x++) {
+            int idx = y * w + x;
+            if (!mask[idx]) continue;
+
+            int px = x * cp;
+            int py = y * cp;
+            if (y == 0 || !mask[idx - w]) {
+                DrawLineEx((Vector2){ (float)px, (float)py }, (Vector2){ (float)(px + cp), (float)py }, 2.0f, outline);
+            }
+            if (y == h - 1 || !mask[idx + w]) {
+                DrawLineEx((Vector2){ (float)px, (float)(py + cp) }, (Vector2){ (float)(px + cp), (float)(py + cp) }, 2.0f, outline);
+            }
+            if (x == 0 || !mask[idx - 1]) {
+                DrawLineEx((Vector2){ (float)px, (float)py }, (Vector2){ (float)px, (float)(py + cp) }, 2.0f, outline);
+            }
+            if (x == w - 1 || !mask[idx + 1]) {
+                DrawLineEx((Vector2){ (float)(px + cp), (float)py }, (Vector2){ (float)(px + cp), (float)(py + cp) }, 2.0f, outline);
+            }
+        }
+    }
+}
+
+static void raster_line_overlay(int w, int h, int cp, int x0, int y0, int x1, int y1, Color fill, Color outline) {
+    uint8_t *mask = (uint8_t *)calloc((size_t)(w * h), 1);
+    int min_x = w, min_y = h, max_x = -1, max_y = -1;
     int dx = abs(x1 - x0), sx = (x0 < x1) ? 1 : -1;
     int dy = -abs(y1 - y0), sy = (y0 < y1) ? 1 : -1;
     int err = dx + dy;
 
     while (1) {
         if (x0 >= 0 && x0 < w && y0 >= 0 && y0 < h) {
-            DrawRectangle(x0 * cp, y0 * cp, cp, cp, color);
+            DrawRectangle(x0 * cp, y0 * cp, cp, cp, fill);
+            if (mask) {
+                mask[y0 * w + x0] = 1;
+                if (x0 < min_x) min_x = x0;
+                if (x0 > max_x) max_x = x0;
+                if (y0 < min_y) min_y = y0;
+                if (y0 > max_y) max_y = y0;
+            }
         }
         if (x0 == x1 && y0 == y1) break;
         int e2 = 2 * err;
         if (e2 >= dy) { err += dy; x0 += sx; }
         if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+
+    if (mask) {
+        draw_mask_outer_outline(mask, w, h, cp, outline, min_x - 1, min_y - 1, max_x + 1, max_y + 1);
+        free(mask);
     }
 }
 
@@ -112,26 +170,6 @@ static void raster_rect_to_grid(uint8_t *grid, int w, int h, int x0, int y0, int
         if (y >= 0 && y < h) {
             if (left >= 0 && left < w) grid[y * w + left] = value;
             if (right >= 0 && right < w) grid[y * w + right] = value;
-        }
-    }
-}
-
-static void raster_rect_overlay(int w, int h, int cp, int x0, int y0, int x1, int y1, Color color) {
-    int left = (x0 < x1) ? x0 : x1;
-    int right = (x0 > x1) ? x0 : x1;
-    int top = (y0 < y1) ? y0 : y1;
-    int bottom = (y0 > y1) ? y0 : y1;
-
-    for (int x = left; x <= right; x++) {
-        if (x >= 0 && x < w) {
-            if (top >= 0 && top < h) DrawRectangle(x * cp, top * cp, cp, cp, color);
-            if (bottom >= 0 && bottom < h) DrawRectangle(x * cp, bottom * cp, cp, cp, color);
-        }
-    }
-    for (int y = top; y <= bottom; y++) {
-        if (y >= 0 && y < h) {
-            if (left >= 0 && left < w) DrawRectangle(left * cp, y * cp, cp, cp, color);
-            if (right >= 0 && right < w) DrawRectangle(right * cp, y * cp, cp, cp, color);
         }
     }
 }
@@ -176,6 +214,65 @@ static void flood_fill(uint8_t *grid, int w, int h, int sx, int sy, uint8_t new_
 
     free(stack_x);
     free(stack_y);
+}
+
+static void flood_fill_overlay(const uint8_t *grid, int w, int h, int sx, int sy,
+                               int cp, Color fill, Color outline) {
+    if (sx < 0 || sx >= w || sy < 0 || sy >= h) return;
+
+    uint8_t old_value = grid[sy * w + sx];
+    if (old_value == 1) return; /* fill tool writes 1, so preview only real changes */
+
+    int max = w * h;
+    int *stack_x = (int *)malloc((size_t)max * sizeof(int));
+    int *stack_y = (int *)malloc((size_t)max * sizeof(int));
+    uint8_t *seen = (uint8_t *)calloc((size_t)max, 1);
+    uint8_t *region = (uint8_t *)calloc((size_t)max, 1);
+    int min_x = w, min_y = h, max_x = -1, max_y = -1;
+    if (!stack_x || !stack_y || !seen || !region) {
+        free(stack_x);
+        free(stack_y);
+        free(seen);
+        free(region);
+        return;
+    }
+
+    int top = 0;
+    stack_x[top] = sx;
+    stack_y[top] = sy;
+    top++;
+
+    while (top > 0) {
+        top--;
+        int x = stack_x[top];
+        int y = stack_y[top];
+
+        if (x < 0 || x >= w || y < 0 || y >= h) continue;
+        int idx = y * w + x;
+        if (seen[idx]) continue;
+        seen[idx] = 1;
+        if (grid[idx] != old_value) continue;
+        region[idx] = 1;
+        if (x < min_x) min_x = x;
+        if (x > max_x) max_x = x;
+        if (y < min_y) min_y = y;
+        if (y > max_y) max_y = y;
+
+        DrawRectangle(x * cp, y * cp, cp, cp, fill);
+
+        if (top + 4 <= max) {
+            stack_x[top] = x + 1; stack_y[top] = y;     top++;
+            stack_x[top] = x - 1; stack_y[top] = y;     top++;
+            stack_x[top] = x;     stack_y[top] = y + 1; top++;
+            stack_x[top] = x;     stack_y[top] = y - 1; top++;
+        }
+    }
+
+    free(stack_x);
+    free(stack_y);
+    free(seen);
+    draw_mask_outer_outline(region, w, h, cp, outline, min_x - 1, min_y - 1, max_x + 1, max_y + 1);
+    free(region);
 }
 
 static void history_clear_stack(uint8_t **stack, int *count) {
@@ -462,39 +559,51 @@ static void handle_mouse(AppState *s, uint8_t *grid, Vector2 mouse, int w, int h
         case TOOL_LINE:
             if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                 Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
+                s->line_pending = 0;
                 if (mp.x >= 0 && mp.y >= 0) {
                     int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
                     if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
-                        if (!s->line_pending) {
-                            s->line_start_x = cx;
-                            s->line_start_y = cy;
-                            s->line_pending = 1;
-                        } else {
-                            history_record(hist, grid);
-                            raster_line_to_grid(grid, w, h, s->line_start_x, s->line_start_y, cx, cy, 1);
-                            s->line_pending = 0;
-                        }
+                        s->line_start_x = cx;
+                        s->line_start_y = cy;
+                        s->line_pending = 1;
                     }
                 }
+            }
+            if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT) && s->line_pending) {
+                Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
+                if (mp.x >= 0 && mp.y >= 0) {
+                    int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
+                    if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
+                        history_record(hist, grid);
+                        raster_line_to_grid(grid, w, h, s->line_start_x, s->line_start_y, cx, cy, 1);
+                    }
+                }
+                s->line_pending = 0;
             }
             break;
         case TOOL_RECT:
             if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                 Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
+                s->rect_pending = 0;
                 if (mp.x >= 0 && mp.y >= 0) {
                     int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
                     if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
-                        if (!s->rect_pending) {
-                            s->rect_start_x = cx;
-                            s->rect_start_y = cy;
-                            s->rect_pending = 1;
-                        } else {
-                            history_record(hist, grid);
-                            raster_rect_to_grid(grid, w, h, s->rect_start_x, s->rect_start_y, cx, cy, 1);
-                            s->rect_pending = 0;
-                        }
+                        s->rect_start_x = cx;
+                        s->rect_start_y = cy;
+                        s->rect_pending = 1;
                     }
                 }
+            }
+            if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT) && s->rect_pending) {
+                Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
+                if (mp.x >= 0 && mp.y >= 0) {
+                    int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
+                    if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
+                        history_record(hist, grid);
+                        raster_rect_to_grid(grid, w, h, s->rect_start_x, s->rect_start_y, cx, cy, 1);
+                    }
+                }
+                s->rect_pending = 0;
             }
             break;
         case TOOL_FILL:
@@ -557,6 +666,9 @@ static void handle_mouse(AppState *s, uint8_t *grid, Vector2 mouse, int w, int h
 
 static void draw_frame(const AppState *s, const uint8_t *grid, Vector2 mouse, int w, int h) {
     int cp = s->cell_px;
+    Color tool_fill;
+    Color tool_outline;
+    tool_overlay_colors(s->active_tool, &tool_fill, &tool_outline);
 
     BeginDrawing();
     ClearBackground(LIGHTGRAY);
@@ -590,8 +702,8 @@ static void draw_frame(const AppState *s, const uint8_t *grid, Vector2 mouse, in
                         sh = abs(s->sel_end_y - s->sel_start_y) + 1;
                     }
                     Rectangle sr = { sx * cp, sy * cp, sw * cp, sh * cp };
-                    DrawRectangleRec(sr,           (Color){  0, 200, 100,  30 });
-                    DrawRectangleLinesEx(sr, 2.0f, (Color){  0, 200, 100, 200 });
+                    DrawRectangleRec(sr, tool_fill);
+                    DrawRectangleLinesEx(sr, 2.0f, tool_outline);
                 }
             }
             break;
@@ -603,14 +715,16 @@ static void draw_frame(const AppState *s, const uint8_t *grid, Vector2 mouse, in
                 int bx0 = (int)(mp.x / cp) - s->clipboard.w / 2;
                 int by0 = (int)(mp.y / cp) - s->clipboard.h / 2;
                 Rectangle pr = { bx0 * cp, by0 * cp, s->clipboard.w * cp, s->clipboard.h * cp };
-                DrawRectangleRec(pr,           (Color){   0, 150, 255,  80 });
-                DrawRectangleLinesEx(pr, 2.0f, (Color){   0, 100, 200, 200 });
+                DrawRectangleRec(pr, tool_fill);
+                DrawRectangleLinesEx(pr, 2.0f, tool_outline);
                 for (int by = 0; by < s->clipboard.h; by++)
                     for (int bx = 0; bx < s->clipboard.w; bx++)
                         if (s->clipboard.data[by * s->clipboard.w + bx]) {
                             int px = bx0 + bx, py = by0 + by;
-                            if (px >= 0 && px < w && py >= 0 && py < h)
-                                DrawRectangle(px * cp, py * cp, cp, cp, (Color){ 100, 200, 255, 120 });
+                            if (px >= 0 && px < w && py >= 0 && py < h) {
+                                DrawRectangle(px * cp, py * cp, cp, cp, tool_fill);
+                                DrawRectangleLines(px * cp, py * cp, cp, cp, tool_outline);
+                            }
                         }
             }
             break;
@@ -621,18 +735,34 @@ static void draw_frame(const AppState *s, const uint8_t *grid, Vector2 mouse, in
                 if (mp.x >= 0 && mp.y >= 0) {
                     int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
                     if (cx >= 0 && cx < w && cy >= 0 && cy < h)
-                        raster_line_overlay(w, h, cp, s->line_start_x, s->line_start_y, cx, cy, (Color){ 0, 0, 0, 110 });
+                        raster_line_overlay(w, h, cp, s->line_start_x, s->line_start_y, cx, cy, tool_fill, tool_outline);
                 }
             }
             break;
+        case TOOL_FILL: {
+            Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
+            if (mp.x >= 0 && mp.y >= 0) {
+                int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
+                if (cx >= 0 && cx < w && cy >= 0 && cy < h)
+                    flood_fill_overlay(grid, w, h, cx, cy, cp, tool_fill, tool_outline);
+            }
+            break;
+        }
         case TOOL_RECT:
             /* rectangle preview from first click to current cursor */
             if (s->rect_pending) {
                 Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
                 if (mp.x >= 0 && mp.y >= 0) {
                     int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
-                    if (cx >= 0 && cx < w && cy >= 0 && cy < h)
-                        raster_rect_overlay(w, h, cp, s->rect_start_x, s->rect_start_y, cx, cy, (Color){ 0, 0, 0, 110 });
+                    if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
+                        int sx = (s->rect_start_x < cx) ? s->rect_start_x : cx;
+                        int sy = (s->rect_start_y < cy) ? s->rect_start_y : cy;
+                        int sw = abs(cx - s->rect_start_x) + 1;
+                        int sh = abs(cy - s->rect_start_y) + 1;
+                        Rectangle rr = { sx * cp, sy * cp, sw * cp, sh * cp };
+                        DrawRectangleRec(rr, tool_fill);
+                        DrawRectangleLinesEx(rr, 2.0f, tool_outline);
+                    }
                 }
             }
             break;
@@ -655,11 +785,8 @@ static void draw_frame(const AppState *s, const uint8_t *grid, Vector2 mouse, in
                     int bx0 = cx - bsz / 2;
                     int by0 = cy - bsz / 2;
                     Rectangle br = { bx0 * cp, by0 * cp, bsz * cp, bsz * cp };
-                    Color ov = (s->active_tool == TOOL_ERASER)
-                        ? (Color){ 255, 255, 255, 120 }
-                        : (Color){ 0, 0, 0, 90 };
-                    DrawRectangleRec(br, ov);
-                    DrawRectangleLinesEx(br, 2.0f, DARKGRAY);
+                    DrawRectangleRec(br, tool_fill);
+                    DrawRectangleLinesEx(br, 2.0f, tool_outline);
                 }
             }
             break;
@@ -747,6 +874,7 @@ int main(int argc, char **argv) {
 
     SetTraceLogLevel(LOG_WARNING);
     InitWindow(s.win_w, s.win_h, "pxed");
+    HideCursor();
     SetTargetFPS(60);
 
     while (!WindowShouldClose()) {
