@@ -4,26 +4,22 @@
 #include <string.h>
 #include "raylib.h"
 
-/* ================================================================
-   constants
-   ================================================================ */
-
 #define CELL_PX   6
 #define MIN_DIM   1
 #define MAX_DIM   1024
 #define MIN_SCALE 0.1f
 #define MAX_SCALE 64.0f
 #define HEADER    "PX"
-
-/* ================================================================
-   types
-   ================================================================ */
+#define HISTORY_LIMIT 64
 
 typedef enum Tool {
     TOOL_PENCIL    = 0,
     TOOL_ERASER    = 1,
     TOOL_SELECT    = 2,
-    TOOL_CLIPBOARD = 3
+    TOOL_CLIPBOARD = 3,
+    TOOL_LINE      = 4,
+    TOOL_FILL      = 5,
+    TOOL_RECT      = 6
 } Tool;
 
 typedef struct {
@@ -44,15 +40,23 @@ typedef struct {
     int       stroke_active;
     int       last_brush_cx, last_brush_cy;
     uint8_t   stroke_value;
+    int       line_pending;
+    int       line_start_x, line_start_y;
+    int       rect_pending;
+    int       rect_start_x, rect_start_y;
     int       selecting;
     int       sel_start_x, sel_start_y;
     int       sel_end_x,   sel_end_y;
     Clipboard clipboard;
 } AppState;
 
-/* ================================================================
-   math helpers
-   ================================================================ */
+typedef struct {
+    uint8_t *undo[HISTORY_LIMIT];
+    int      undo_count;
+    uint8_t *redo[HISTORY_LIMIT];
+    int      redo_count;
+    int      n;
+} History;
 
 static float clampf(float v, float lo, float hi) {
     if (v < lo) return lo;
@@ -60,9 +64,175 @@ static float clampf(float v, float lo, float hi) {
     return v;
 }
 
-/* ================================================================
-   file I/O
-   ================================================================ */
+static void raster_line_to_grid(uint8_t *grid, int w, int h, int x0, int y0, int x1, int y1, uint8_t value) {
+    int dx = abs(x1 - x0), sx = (x0 < x1) ? 1 : -1;
+    int dy = -abs(y1 - y0), sy = (y0 < y1) ? 1 : -1;
+    int err = dx + dy;
+
+    while (1) {
+        if (x0 >= 0 && x0 < w && y0 >= 0 && y0 < h) {
+            grid[y0 * w + x0] = value;
+        }
+        if (x0 == x1 && y0 == y1) break;
+        int e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+}
+
+static void raster_line_overlay(int w, int h, int cp, int x0, int y0, int x1, int y1, Color color) {
+    int dx = abs(x1 - x0), sx = (x0 < x1) ? 1 : -1;
+    int dy = -abs(y1 - y0), sy = (y0 < y1) ? 1 : -1;
+    int err = dx + dy;
+
+    while (1) {
+        if (x0 >= 0 && x0 < w && y0 >= 0 && y0 < h) {
+            DrawRectangle(x0 * cp, y0 * cp, cp, cp, color);
+        }
+        if (x0 == x1 && y0 == y1) break;
+        int e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+}
+
+static void raster_rect_to_grid(uint8_t *grid, int w, int h, int x0, int y0, int x1, int y1, uint8_t value) {
+    int left = (x0 < x1) ? x0 : x1;
+    int right = (x0 > x1) ? x0 : x1;
+    int top = (y0 < y1) ? y0 : y1;
+    int bottom = (y0 > y1) ? y0 : y1;
+
+    for (int x = left; x <= right; x++) {
+        if (x >= 0 && x < w) {
+            if (top >= 0 && top < h) grid[top * w + x] = value;
+            if (bottom >= 0 && bottom < h) grid[bottom * w + x] = value;
+        }
+    }
+    for (int y = top; y <= bottom; y++) {
+        if (y >= 0 && y < h) {
+            if (left >= 0 && left < w) grid[y * w + left] = value;
+            if (right >= 0 && right < w) grid[y * w + right] = value;
+        }
+    }
+}
+
+static void raster_rect_overlay(int w, int h, int cp, int x0, int y0, int x1, int y1, Color color) {
+    int left = (x0 < x1) ? x0 : x1;
+    int right = (x0 > x1) ? x0 : x1;
+    int top = (y0 < y1) ? y0 : y1;
+    int bottom = (y0 > y1) ? y0 : y1;
+
+    for (int x = left; x <= right; x++) {
+        if (x >= 0 && x < w) {
+            if (top >= 0 && top < h) DrawRectangle(x * cp, top * cp, cp, cp, color);
+            if (bottom >= 0 && bottom < h) DrawRectangle(x * cp, bottom * cp, cp, cp, color);
+        }
+    }
+    for (int y = top; y <= bottom; y++) {
+        if (y >= 0 && y < h) {
+            if (left >= 0 && left < w) DrawRectangle(left * cp, y * cp, cp, cp, color);
+            if (right >= 0 && right < w) DrawRectangle(right * cp, y * cp, cp, cp, color);
+        }
+    }
+}
+
+static void flood_fill(uint8_t *grid, int w, int h, int sx, int sy, uint8_t new_value) {
+    if (sx < 0 || sx >= w || sy < 0 || sy >= h) return;
+
+    uint8_t old_value = grid[sy * w + sx];
+    if (old_value == new_value) return;
+
+    int max = w * h;
+    int *stack_x = (int *)malloc((size_t)max * sizeof(int));
+    int *stack_y = (int *)malloc((size_t)max * sizeof(int));
+    if (!stack_x || !stack_y) {
+        free(stack_x);
+        free(stack_y);
+        return;
+    }
+
+    int top = 0;
+    stack_x[top] = sx;
+    stack_y[top] = sy;
+    top++;
+
+    while (top > 0) {
+        top--;
+        int x = stack_x[top];
+        int y = stack_y[top];
+
+        if (x < 0 || x >= w || y < 0 || y >= h) continue;
+        if (grid[y * w + x] != old_value) continue;
+
+        grid[y * w + x] = new_value;
+
+        if (top + 4 <= max) {
+            stack_x[top] = x + 1; stack_y[top] = y;     top++;
+            stack_x[top] = x - 1; stack_y[top] = y;     top++;
+            stack_x[top] = x;     stack_y[top] = y + 1; top++;
+            stack_x[top] = x;     stack_y[top] = y - 1; top++;
+        }
+    }
+
+    free(stack_x);
+    free(stack_y);
+}
+
+static void history_clear_stack(uint8_t **stack, int *count) {
+    for (int i = 0; i < *count; i++) {
+        free(stack[i]);
+        stack[i] = NULL;
+    }
+    *count = 0;
+}
+
+static int history_push_snapshot(uint8_t **stack, int *count, int n, const uint8_t *grid) {
+    uint8_t *snap = (uint8_t *)malloc((size_t)n);
+    if (!snap) return 0;
+    memcpy(snap, grid, (size_t)n);
+
+    if (*count == HISTORY_LIMIT) {
+        free(stack[0]);
+        memmove(&stack[0], &stack[1], (size_t)(HISTORY_LIMIT - 1) * sizeof(uint8_t *));
+        *count = HISTORY_LIMIT - 1;
+    }
+    stack[*count] = snap;
+    (*count)++;
+    return 1;
+}
+
+static void history_init(History *h, int n) {
+    memset(h, 0, sizeof(*h));
+    h->n = n;
+}
+
+static void history_free(History *h) {
+    history_clear_stack(h->undo, &h->undo_count);
+    history_clear_stack(h->redo, &h->redo_count);
+}
+
+static void history_record(History *h, const uint8_t *grid) {
+    if (!history_push_snapshot(h->undo, &h->undo_count, h->n, grid)) return;
+    history_clear_stack(h->redo, &h->redo_count);
+}
+
+static void history_undo(History *h, uint8_t *grid) {
+    if (h->undo_count == 0) return;
+    if (!history_push_snapshot(h->redo, &h->redo_count, h->n, grid)) return;
+    h->undo_count--;
+    memcpy(grid, h->undo[h->undo_count], (size_t)h->n);
+    free(h->undo[h->undo_count]);
+    h->undo[h->undo_count] = NULL;
+}
+
+static void history_redo(History *h, uint8_t *grid) {
+    if (h->redo_count == 0) return;
+    if (!history_push_snapshot(h->undo, &h->undo_count, h->n, grid)) return;
+    h->redo_count--;
+    memcpy(grid, h->redo[h->redo_count], (size_t)h->n);
+    free(h->redo[h->redo_count]);
+    h->redo[h->redo_count] = NULL;
+}
 
 static uint8_t *load_grid(const char *path, int w, int h) {
     int n = w * h;
@@ -108,10 +278,6 @@ static void save_grid(const char *path, const uint8_t *grid, int w, int h) {
     fclose(f);
 }
 
-/* ================================================================
-   clipboard
-   ================================================================ */
-
 static void clipboard_copy(Clipboard *clip, const uint8_t *grid, int grid_w, int grid_h, int x, int y, int w, int h) {
     if (clip->data) free(clip->data);
     clip->x = x;
@@ -136,10 +302,6 @@ static void clipboard_free(Clipboard *clip) {
     clip->w = clip->h = 0;
 }
 
-/* ================================================================
-   camera
-   ================================================================ */
-
 static void update_camera(AppState *s, Vector2 mouse, int ctrl_down) {
     float zoom_delta = GetMouseWheelMove();
     if (ctrl_down && (IsKeyPressed(KEY_EQUAL) || IsKeyPressed(KEY_KP_ADD)))      zoom_delta += 1.0f;
@@ -161,7 +323,7 @@ static void update_camera(AppState *s, Vector2 mouse, int ctrl_down) {
     if (IsKeyDown(KEY_UP))    s->cam.target.y -= pan;
     if (IsKeyDown(KEY_DOWN))  s->cam.target.y += pan;
 
-    if (IsKeyPressed(KEY_R)) {
+    if (ctrl_down && IsKeyPressed(KEY_R)) {
         s->cam.zoom   = s->initial_zoom;
         s->cam.target = (Vector2){ s->canvas_w * 0.5f, s->canvas_h * 0.5f };
     }
@@ -174,41 +336,73 @@ static void update_camera(AppState *s, Vector2 mouse, int ctrl_down) {
         ? clampf(s->cam.target.y, hvh, (float)s->canvas_h - hvh) : s->canvas_h * 0.5f;
 }
 
-/* ================================================================
-   keyboard input
-   ================================================================ */
+static void handle_keys(AppState *s, int ctrl_down, int w, int h, uint8_t *grid, History *hist) {
+    if (IsKeyPressed(KEY_G))
+        s->show_grid = !s->show_grid;
 
-static void handle_keys(AppState *s, int ctrl_down, int w, int h) {
-    if (IsKeyPressed(KEY_G)) s->show_grid = !s->show_grid;
-
+    if (ctrl_down && IsKeyPressed(KEY_Z)) {
+        history_undo(hist, grid);
+        s->line_pending = 0;
+        s->rect_pending = 0;
+        s->selecting = 0;
+    }
+    if (ctrl_down && IsKeyPressed(KEY_Y)) {
+        history_redo(hist, grid);
+        s->line_pending = 0;
+        s->rect_pending = 0;
+        s->selecting = 0;
+    }
     if (IsKeyPressed(KEY_P)) {
         s->active_tool = TOOL_PENCIL;
+        s->line_pending = 0;
+        s->rect_pending = 0;
         s->selecting   = 0;
         clipboard_free(&s->clipboard);
     }
     if (IsKeyPressed(KEY_E)) {
         s->active_tool = TOOL_ERASER;
+        s->line_pending = 0;
+        s->rect_pending = 0;
         s->selecting   = 0;
         clipboard_free(&s->clipboard);
     }
     if (IsKeyPressed(KEY_S)) {
         s->active_tool = TOOL_SELECT;
+        s->line_pending = 0;
+        s->rect_pending = 0;
+        s->selecting   = 0;
+        clipboard_free(&s->clipboard);
+    }
+    if (IsKeyPressed(KEY_L)) {
+        s->active_tool = TOOL_LINE;
+        s->line_pending = 0;
+        s->rect_pending = 0;
+        s->selecting   = 0;
+        clipboard_free(&s->clipboard);
+    }
+    if (IsKeyPressed(KEY_F)) {
+        s->active_tool = TOOL_FILL;
+        s->line_pending = 0;
+        s->rect_pending = 0;
+        s->selecting   = 0;
+        clipboard_free(&s->clipboard);
+    }
+    if (!ctrl_down && IsKeyPressed(KEY_R)) {
+        s->active_tool = TOOL_RECT;
+        s->line_pending = 0;
+        s->rect_pending = 0;
         s->selecting   = 0;
         clipboard_free(&s->clipboard);
     }
 
     if (!ctrl_down) {
         int max_brush = (w < h) ? w : h;
-        if ((IsKeyPressed(KEY_EQUAL)  || IsKeyPressed(KEY_KP_ADD))      && s->brush_size < max_brush) s->brush_size++;
-        if ((IsKeyPressed(KEY_MINUS)  || IsKeyPressed(KEY_KP_SUBTRACT)) && s->brush_size > 1)         s->brush_size--;
+        if ((IsKeyPressed(KEY_EQUAL) || IsKeyPressed(KEY_KP_ADD))      && s->brush_size < max_brush) s->brush_size++;
+        if ((IsKeyPressed(KEY_MINUS) || IsKeyPressed(KEY_KP_SUBTRACT)) && s->brush_size > 1)         s->brush_size--;
     }
 }
 
-/* ================================================================
-   mouse input  (selection, drawing, copy/paste)
-   ================================================================ */
-
-static void handle_mouse(AppState *s, uint8_t *grid, Vector2 mouse, int w, int h) {
+static void handle_mouse(AppState *s, uint8_t *grid, Vector2 mouse, int w, int h, History *hist) {
     int cp = s->cell_px;
 
     if (s->active_tool == TOOL_SELECT) {
@@ -247,14 +441,65 @@ static void handle_mouse(AppState *s, uint8_t *grid, Vector2 mouse, int w, int h
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && s->clipboard.data) {
             Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
             if (mp.x >= 0 && mp.y >= 0) {
+                history_record(hist, grid);
                 int base_x = (int)(mp.x / cp) - s->clipboard.w / 2;
                 int base_y = (int)(mp.y / cp) - s->clipboard.h / 2;
                 for (int by = 0; by < s->clipboard.h; by++)
                     for (int bx = 0; bx < s->clipboard.w; bx++) {
                         int gx = base_x + bx, gy = base_y + by;
-                        if (gx >= 0 && gx < w && gy >= 0 && gy < h)
-                            grid[gy * w + gx] = s->clipboard.data[by * s->clipboard.w + bx] ? 1 : 0;
+                        if (gx >= 0 && gx < w && gy >= 0 && gy < h
+                            && s->clipboard.data[by * s->clipboard.w + bx])
+                            grid[gy * w + gx] = 1;
                     }
+            }
+        }
+    } else if (s->active_tool == TOOL_LINE) {
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
+            if (mp.x >= 0 && mp.y >= 0) {
+                int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
+                if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
+                    if (!s->line_pending) {
+                        s->line_start_x = cx;
+                        s->line_start_y = cy;
+                        s->line_pending = 1;
+                    } else {
+                        history_record(hist, grid);
+                        raster_line_to_grid(grid, w, h, s->line_start_x, s->line_start_y, cx, cy, 1);
+                        s->line_pending = 0;
+                    }
+                }
+            }
+        }
+    } else if (s->active_tool == TOOL_RECT) {
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
+            if (mp.x >= 0 && mp.y >= 0) {
+                int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
+                if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
+                    if (!s->rect_pending) {
+                        s->rect_start_x = cx;
+                        s->rect_start_y = cy;
+                        s->rect_pending = 1;
+                    } else {
+                        history_record(hist, grid);
+                        raster_rect_to_grid(grid, w, h, s->rect_start_x, s->rect_start_y, cx, cy, 1);
+                        s->rect_pending = 0;
+                    }
+                }
+            }
+        }
+    } else if (s->active_tool == TOOL_FILL) {
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
+            if (mp.x >= 0 && mp.y >= 0) {
+                int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
+                if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
+                    if (grid[cy * w + cx] != 1) {
+                        history_record(hist, grid);
+                        flood_fill(grid, w, h, cx, cy, 1);
+                    }
+                }
             }
         }
     } else {
@@ -267,6 +512,7 @@ static void handle_mouse(AppState *s, uint8_t *grid, Vector2 mouse, int w, int h
                 if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
                     s->stroke_value  = (s->active_tool == TOOL_PENCIL) ? 1 : 0;
                     s->stroke_active = 1;
+                    history_record(hist, grid);
                 }
             }
         }
@@ -298,10 +544,6 @@ static void handle_mouse(AppState *s, uint8_t *grid, Vector2 mouse, int w, int h
     }
 
 }
-
-/* ================================================================
-   rendering
-   ================================================================ */
 
 static void draw_frame(const AppState *s, const uint8_t *grid, Vector2 mouse, int w, int h) {
     int cp = s->cell_px;
@@ -359,16 +601,43 @@ static void draw_frame(const AppState *s, const uint8_t *grid, Vector2 mouse, in
                 }
     }
 
-    /* brush cursor (pencil/eraser only) */
-    if (s->active_tool == TOOL_PENCIL || s->active_tool == TOOL_ERASER) {
+    /* line preview from first click to current cursor */
+    if (s->active_tool == TOOL_LINE && s->line_pending) {
         Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
         if (mp.x >= 0 && mp.y >= 0) {
             int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
             if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
-                int bx0 = cx - s->brush_size / 2, by0 = cy - s->brush_size / 2;
-                Rectangle br = { bx0 * cp, by0 * cp, s->brush_size * cp, s->brush_size * cp };
-                Color ov = (s->active_tool == TOOL_PENCIL)
-                    ? (Color){ 0, 0, 0, 90 } : (Color){ 255, 255, 255, 120 };
+                raster_line_overlay(w, h, cp, s->line_start_x, s->line_start_y, cx, cy, (Color){ 0, 0, 0, 110 });
+            }
+        }
+    }
+
+    /* rectangle preview from first click to current cursor */
+    if (s->active_tool == TOOL_RECT && s->rect_pending) {
+        Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
+        if (mp.x >= 0 && mp.y >= 0) {
+            int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
+            if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
+                raster_rect_overlay(w, h, cp, s->rect_start_x, s->rect_start_y, cx, cy, (Color){ 0, 0, 0, 110 });
+            }
+        }
+    }
+
+    /* brush cursor (pencil/eraser/line/fill/rect) */
+    if (s->active_tool == TOOL_PENCIL || s->active_tool == TOOL_ERASER
+        || s->active_tool == TOOL_LINE || s->active_tool == TOOL_FILL || s->active_tool == TOOL_RECT) {
+        Vector2 mp = GetScreenToWorld2D(mouse, s->cam);
+        if (mp.x >= 0 && mp.y >= 0) {
+            int cx = (int)(mp.x / cp), cy = (int)(mp.y / cp);
+            if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
+                int bsz = (s->active_tool == TOOL_LINE || s->active_tool == TOOL_FILL || s->active_tool == TOOL_RECT)
+                    ? 1 : s->brush_size;
+                int bx0 = cx - bsz / 2;
+                int by0 = cy - bsz / 2;
+                Rectangle br = { bx0 * cp, by0 * cp, bsz * cp, bsz * cp };
+                Color ov = (s->active_tool == TOOL_ERASER)
+                    ? (Color){ 255, 255, 255, 120 }
+                    : (Color){ 0, 0, 0, 90 };
                 DrawRectangleRec(br, ov);
                 DrawRectangleLinesEx(br, 2.0f, DARKGRAY);
             }
@@ -379,10 +648,6 @@ static void draw_frame(const AppState *s, const uint8_t *grid, Vector2 mouse, in
     EndDrawing();
 }
 
-/* ================================================================
-   usage / help
-   ================================================================ */
-
 static void usage(FILE *out, int code) {
     fprintf(out, "usage: pxed -w <width> -h <height> -f <file> [-s <scale>] [--help]\n\n");
     fprintf(out, "options:\n");
@@ -392,22 +657,23 @@ static void usage(FILE *out, int code) {
     fprintf(out, "  -s <scale>   initial window scale multiplier (%.1f-%.1f, fractional allowed)\n", MIN_SCALE, MAX_SCALE);
     fprintf(out, "  --help, -?   show this help and exit\n\n");
     fprintf(out, "keyboard shortcuts:\n");
-    fprintf(out, "  P / E / S    select pencil / eraser / selection\n");
+    fprintf(out, "  P / E / S / L / F / R\n");
+    fprintf(out, "               select pencil / eraser / selection / line / fill / rect\n");
     fprintf(out, "  + / -        increase / decrease brush size (pencil/eraser)\n");
     fprintf(out, "  Left Drag    paint / select region\n");
     fprintf(out, "  Release Drag auto-copy selection (switches to clipboard brush)\n");
     fprintf(out, "  Left Click   paste clipboard brush at cursor\n");
+    fprintf(out, "  Line Tool    click once to start, click again to commit line\n");
+    fprintf(out, "  Fill Tool    click a cell to flood fill contiguous region\n");
+    fprintf(out, "  Rect Tool    click once to start, click again to commit rectangle\n");
     fprintf(out, "  Mouse Wheel  zoom camera\n");
     fprintf(out, "  Ctrl + / -   zoom in/out\n");
+    fprintf(out, "  Ctrl + Z / Y undo / redo\n");
     fprintf(out, "  Arrow Keys   pan camera\n");
-    fprintf(out, "  R            reset camera\n");
+    fprintf(out, "  Ctrl + R     reset camera\n");
     fprintf(out, "  G            toggle grid\n");
     exit(code);
 }
-
-/* ================================================================
-   entry point
-   ================================================================ */
 
 int main(int argc, char **argv) {
     int w = 0, h = 0;
@@ -435,6 +701,10 @@ int main(int argc, char **argv) {
 
     uint8_t *grid = load_grid(fpath, w, h);
     if (!grid) { fprintf(stderr, "pxed: out of memory\n"); return 1; }
+
+    int n = w * h;
+    History hist;
+    history_init(&hist, n);
 
     AppState s     = {0};
     s.cell_px      = CELL_PX;
@@ -466,13 +736,14 @@ int main(int argc, char **argv) {
         Vector2 mouse     = GetMousePosition();
         int     ctrl_down = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
         update_camera(&s, mouse, ctrl_down);
-        handle_keys(&s, ctrl_down, w, h);
-        handle_mouse(&s, grid, mouse, w, h);
+        handle_keys(&s, ctrl_down, w, h, grid, &hist);
+        handle_mouse(&s, grid, mouse, w, h, &hist);
         draw_frame(&s, grid, mouse, w, h);
     }
 
     CloseWindow();
     clipboard_free(&s.clipboard);
+    history_free(&hist);
     save_grid(fpath, grid, w, h);
     free(grid);
     return 0;

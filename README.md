@@ -33,7 +33,16 @@ pxed -w <width> -h <height> -f <file> [-s <scale>]
 pxed -w 160 -h 160 -f "my_pixel_art.px" -s 2
 ```
 
-- Press **P** for Pencil, **E** for Eraser, and **S** for Selection.
+- Press **P** for Pencil, **E** for Eraser, **S** for Selection, **L** for Line, and **F** for Fill.
+
+### Tool Overview
+
+- **Pencil** paints filled cells with the current brush size.
+- **Eraser** clears filled cells with the current brush size.
+- **Selection** drags out a rectangular selection and auto-copies it on release.
+- **Clipboard Brush** appears after a selection is copied and stamps the copied "on" pixels.
+- **Line** places a line using two clicks: one to start, one to finish.
+- **Fill** flood-fills the contiguous region under the cursor.
 
 ### Keyboard shortcuts
 
@@ -42,18 +51,25 @@ pxed -w 160 -h 160 -f "my_pixel_art.px" -s 2
 | `P` | select Pencil tool (clears clipboard brush) |
 | `E` | select Eraser tool (clears clipboard brush) |
 | `S` | select Selection tool (clears clipboard brush) |
+| `L` | select Line tool (clears clipboard brush) |
+| `F` | select Fill tool (clears clipboard brush) |
 | `+` / `-` | increase / decrease brush size (pencil/eraser) |
 | Left drag (P/E) | paint continuously |
 | Left drag (S) | define selection rectangle (starts at 1x1, stretches while dragging) |
 | Left release (S) | auto-copy selection and switch to Clipboard Brush |
-| Left click (Clipboard Brush) | paste/stamp clipboard at cursor |
+| Left click (Clipboard Brush) | paste/stamp only copied "on" cells at cursor |
+| Left click (Line, first) | set line start point |
+| Left click (Line, second) | commit line to canvas |
+| Left click (Fill) | flood fill contiguous region |
 | Mouse wheel | zoom camera |
 | Ctrl `+` / Ctrl `-` | zoom camera in/out |
+| Ctrl `Z` / Ctrl `Y` | undo / redo |
 | Arrow keys | pan camera |
 | `R` | reset camera zoom/position |
 | `G` | toggle grid visibility |
 
 - Clipboard Brush preview is centered on the cursor.
+- Line tool shows a live preview overlay between the first click and the current cursor position.
 - Drawing is auto-saved when the window is closed.
 
 ## File format
