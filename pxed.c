@@ -359,6 +359,40 @@ static void save_grid(const char *path, const uint8_t *grid, int w, int h) {
     fclose(f);
 }
 
+static void export_png(const char *fpath, const uint8_t *grid, int w, int h) {
+    char png_path[256];
+    strncpy(png_path, fpath, sizeof(png_path) - 1);
+    png_path[sizeof(png_path) - 1] = '\0';
+    
+    char *ext = strrchr(png_path, '.');
+    if (ext) {
+        strcpy(ext, ".png");
+    } else {
+        strncat(png_path, ".png", sizeof(png_path) - strlen(png_path) - 1);
+    }
+    
+    Image img = GenImageColor(w, h, WHITE);
+    if (!img.data) {
+        fprintf(stderr, "pxed: cannot create image for PNG export\n");
+        return;
+    }
+    
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            Color pixel = grid[y * w + x] ? (Color){32, 32, 32, 255} : (Color){255, 255, 255, 255};
+            ImageDrawPixel(&img, x, y, pixel);
+        }
+    }
+    
+    if (ExportImage(img, png_path)) {
+        printf("pxed: exported to %s\n", png_path);
+    } else {
+        fprintf(stderr, "pxed: cannot write %s\n", png_path);
+    }
+    
+    UnloadImage(img);
+}
+
 static void clipboard_copy(Clipboard *clip, const uint8_t *grid, int grid_w, int grid_h, int x, int y, int w, int h) {
     if (clip->data) free(clip->data);
     clip->x = x;
@@ -502,7 +536,11 @@ static void handle_keys(AppState *s, int ctrl_down, int w, int h, uint8_t *grid,
                 break;
             case KEY_S:
                 if (ctrl_down) {
-                    save_grid(fpath, grid, w, h);
+                    if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) {
+                        export_png(fpath, grid, w, h);
+                    } else {
+                        save_grid(fpath, grid, w, h);
+                    }
                 }
                 break;
             case KEY_Z:
@@ -876,6 +914,7 @@ static void usage(FILE *out, int code) {
     fprintf(out, "  Ctrl + / -   zoom in/out\n");
     fprintf(out, "  Ctrl + R     reset camera\n");
     fprintf(out, "  Ctrl + S     save file\n");
+    fprintf(out, "  Ctrl + Shift + S export as PNG\n");
     fprintf(out, "  Ctrl + Z / Y undo / redo\n");
     fprintf(out, "  Ctrl + 0-9   store current clipboard patch to a slot\n");
     fprintf(out, "  0-9          switch to clipboard mode with the stored slot\n");
