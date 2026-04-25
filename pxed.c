@@ -13,6 +13,7 @@
 #define HEADER              "PX"
 #define HISTORY_LIMIT       64
 #define BOUND_BUFFER_CELLS  8
+#define CLIPBOARD_SLOT_COUNT 10
 
 #define SWITCH_TOOL(s, t) do {          \
     (s)->active_tool  = (t);            \
@@ -59,6 +60,7 @@ typedef struct {
     int       sel_start_x, sel_start_y;
     int       sel_end_x,   sel_end_y;
     Clipboard clipboard;
+    Clipboard clipboard_slots[CLIPBOARD_SLOT_COUNT];
 } AppState;
 
 typedef struct {
@@ -381,6 +383,51 @@ static inline void clipboard_free(Clipboard *clip) {
     clip->w = clip->h = 0;
 }
 
+static int clipboard_clone(Clipboard *dst, const Clipboard *src) {
+    clipboard_free(dst);
+    dst->x = src->x;
+    dst->y = src->y;
+    dst->w = src->w;
+    dst->h = src->h;
+    if (!src->data || src->w <= 0 || src->h <= 0) return 0;
+
+    int n = src->w * src->h;
+    dst->data = (uint8_t *)malloc((size_t)n);
+    if (!dst->data) {
+        dst->w = dst->h = 0;
+        return 0;
+    }
+
+    memcpy(dst->data, src->data, (size_t)n);
+    return 1;
+}
+
+static int key_to_clipboard_slot(int key) {
+    switch (key) {
+        case KEY_ZERO:
+        case KEY_KP_0: return 0;
+        case KEY_ONE:
+        case KEY_KP_1: return 1;
+        case KEY_TWO:
+        case KEY_KP_2: return 2;
+        case KEY_THREE:
+        case KEY_KP_3: return 3;
+        case KEY_FOUR:
+        case KEY_KP_4: return 4;
+        case KEY_FIVE:
+        case KEY_KP_5: return 5;
+        case KEY_SIX:
+        case KEY_KP_6: return 6;
+        case KEY_SEVEN:
+        case KEY_KP_7: return 7;
+        case KEY_EIGHT:
+        case KEY_KP_8: return 8;
+        case KEY_NINE:
+        case KEY_KP_9: return 9;
+        default: return -1;
+    }
+}
+
 static void update_camera(AppState *s, Vector2 mouse, int ctrl_down) {
     float zoom_delta = GetMouseWheelMove();
     if (ctrl_down && (IsKeyPressed(KEY_EQUAL) || IsKeyPressed(KEY_KP_ADD)))      zoom_delta += 1.0f;
@@ -434,6 +481,21 @@ static void handle_keys(AppState *s, int ctrl_down, int w, int h, uint8_t *grid,
     int max_brush = (w < h) ? w : h;
     int key;
     while ((key = GetKeyPressed()) != KEY_NULL) {
+        int slot = key_to_clipboard_slot(key);
+        if (slot >= 0) {
+            if (ctrl_down) {
+                if (s->clipboard.data) {
+                    clipboard_clone(&s->clipboard_slots[slot], &s->clipboard);
+                }
+            } else if (s->clipboard_slots[slot].data && clipboard_clone(&s->clipboard, &s->clipboard_slots[slot])) {
+                s->active_tool  = TOOL_CLIPBOARD;
+                s->line_pending = 0;
+                s->rect_pending = 0;
+                s->selecting    = 0;
+            }
+            continue;
+        }
+
         switch (key) {
             case KEY_G:
                 s->show_grid = !s->show_grid;
@@ -815,6 +877,8 @@ static void usage(FILE *out, int code) {
     fprintf(out, "  Ctrl + R     reset camera\n");
     fprintf(out, "  Ctrl + S     save file\n");
     fprintf(out, "  Ctrl + Z / Y undo / redo\n");
+    fprintf(out, "  Ctrl + 0-9   store current clipboard patch to a slot\n");
+    fprintf(out, "  0-9          switch to clipboard mode with the stored slot\n");
     exit(code);
 }
 
@@ -897,6 +961,8 @@ int main(int argc, char **argv) {
 
     CloseWindow();
     clipboard_free(&s.clipboard);
+    for (int i = 0; i < CLIPBOARD_SLOT_COUNT; i++)
+        clipboard_free(&s.clipboard_slots[i]);
     history_free(&hist);
     save_grid(fpath, grid, w, h);
     free(grid);
