@@ -42,7 +42,7 @@ For help, run: `pxed --help`
 ### Getting Started
 
 1. **Create a new project:** `pxed -w 16 -h 16 -f myart.px`
-2. **Select a tool:** Press **P** (Pencil), **E** (Eraser), **S** (Selection), **L** (Line), or **F** (Fill)
+2. **Select a tool:** Press **P** (Pencil), **E** (Eraser), **C** (Copy), **X** (Cut), **L** (Line), **R** (Rect), or **F** (Fill)
 3. **Draw:** Use your mouse to create pixel art
 4. **Save:** Close the window—your work is automatically saved to the file
 5. **Reopen:** `pxed -w 16 -h 16 -f myart.px` to continue editing
@@ -59,11 +59,21 @@ Clear (remove) filled cells with the current brush size. Operates like the Penci
 - **Left drag:** Erase continuously
 - **Brush size:** Adjust with `+` (larger) and `-` (smaller) keys
 
-#### Selection (`S`)
+#### Copy (`C`)
 Copy regions of your artwork to use as a reusable brush.
 1. **Left drag:** Draw a rectangular selection box (starts at 1×1, expands as you drag)
 2. **Left release:** The selection is auto-copied; tool switches to Clipboard Brush
 3. **Left click (Clipboard Brush):** Paste/stamp the copied artwork at the cursor position
+
+#### Cut (`X`)
+Cut (copy and erase) regions of your artwork to use as a reusable brush.
+1. **Left drag:** Draw a rectangular selection box
+2. **Left release:** The selection is copied and erased; tool switches to Clipboard Brush
+3. **Left click (Clipboard Brush):** Paste/stamp the cut artwork at the cursor position
+
+#### Clipboard Brush
+Reusable brush created by Copy or Cut. Automatically activated after a copy/cut operation.
+- **Left click:** Paste/stamp the clipboard content at the cursor position
 - **Ctrl + `0`-`9`:** Store the current clipboard patch to a slot
 - **Number keys `0`-`9`:** Recall a stored slot into Clipboard Brush
 - **Clipboard Brush preview:** Centered on the cursor, showing semi-transparent preview
@@ -72,6 +82,11 @@ Copy regions of your artwork to use as a reusable brush.
 Draw straight lines with two clicks.
 1. **First left click:** Set the line start point
 2. **Second left click:** Complete the line (preview shown while dragging between clicks)
+
+#### Rectangle (`R`)
+Draw filled rectangles with two clicks.
+1. **First left click:** Set the rectangle start corner
+2. **Second left click:** Complete the rectangle (preview shown while dragging between clicks)
 
 #### Fill (`F`)
 Flood-fill the contiguous region of cells under the cursor. Fills all connected cells of the same type.
@@ -84,7 +99,7 @@ Flood-fill the contiguous region of cells under the cursor. Fills all connected 
 | **Mouse wheel** | zoom camera in/out |
 | **Ctrl `+` / Ctrl `-`** | zoom camera in/out (alternative) |
 | **Arrow keys** | pan camera (move view) |
-| **`R`** | reset camera zoom and position to default |
+| **Ctrl `R`** | reset camera zoom and position to default |
 | **`G`** | toggle grid visibility (helpful for precision) |
 
 ### Editing & History
@@ -100,17 +115,21 @@ Flood-fill the contiguous region of cells under the cursor. Fills all connected 
 |-----|--------|
 | `P` | select Pencil tool (clears clipboard brush) |
 | `E` | select Eraser tool (clears clipboard brush) |
-| `S` | select Selection tool (clears clipboard brush) |
+| `C` | select Copy tool (clears clipboard brush) |
+| `X` | select Cut tool (clears clipboard brush) |
 | `L` | select Line tool (clears clipboard brush) |
+| `R` | select Rectangle tool (clears clipboard brush) |
 | `F` | select Fill tool (clears clipboard brush) |
 | Ctrl `0`-`9` | save the current clipboard patch to that slot |
 | `0`-`9` | switch to Clipboard Brush with that stored slot |
 | `+` / `-` | increase / decrease brush size (pencil/eraser) |
 | Mouse wheel | zoom camera |
 | Ctrl `+` / Ctrl `-` | zoom camera in/out |
+| Ctrl `R` | reset camera zoom/position |
 | Ctrl `Z` / Ctrl `Y` | undo / redo |
+| Ctrl `S` | save to `.px` file |
+| Ctrl + Shift `S` | export as PNG (black and white) |
 | Arrow keys | pan camera |
-| `R` | reset camera zoom/position |
 | `G` | toggle grid visibility |
 
 ### Tips & Tricks
@@ -144,7 +163,14 @@ A: Yes! Use Ctrl `Z` to undo (up to 64 steps) and Ctrl `Y` to redo.
 A: Canvas size is set when launching. Create a new file with different dimensions if needed.
 
 **Q: Can I export to other formats?**  
-A: Currently, pxed saves to its native `.px` format. You can extend the source code to add export functionality.
+A: Yes! Use Ctrl + Shift `S` to export your artwork as a black and white PNG image. The PNG will be saved with the same name as your `.px` file but with the `.png` extension.
+
+### Exporting
+
+You can export your pixel art as a PNG image:
+- **Ctrl + Shift `S`** exports as PNG (black and white)
+- PNG filename: same as your `.px` file with `.png` extension
+- **Example:** `myart.px` → `myart.png`
 
 ## File format
 
